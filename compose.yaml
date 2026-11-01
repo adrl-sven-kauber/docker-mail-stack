@@ -1,0 +1,85 @@
+# docker-mail-stack: docker-mailserver (Postfix, Dovecot, rspamd, fail2ban) + Roundcube webmail.
+# Settings come from .env (copy .env.example). Data lives in ./data, config in ./config.
+#
+# Ports 25/465/587/993 are published on all interfaces on purpose. Note: Docker-published
+# ports bypass ufw. Webmail listens on 127.0.0.1 only; put your host's nginx in front of it
+# (nginx/webmail.conf.example).
+#
+# Updates: ./update.sh pulls new releases within the pinned lines below (DMS 16.x, Roundcube 1.7.x).
+# Move to a new major version by hand, after reading its changelog.
+name: mail
+
+services:
+  mailserver:
+    image: ghcr.io/docker-mailserver/docker-mailserver:16
+    container_name: mailserver
+    hostname: ${MAIL_HOSTNAME:?set MAIL_HOSTNAME in .env}
+    ports:
+      - "25:25"     # SMTP: mail from other servers
+      - "465:465"   # submission, implicit TLS (mail clients)
+      - "587:587"   # submission, STARTTLS (mail clients)
+      - "993:993"   # IMAPS
+    volumes:
+      - ./data/mail:/var/mail/
+      - ./data/state:/var/mail-state/
+      - ./data/logs:/var/log/mail/
+      - ./config/:/tmp/docker-mailserver/
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - SSL_TYPE=letsencrypt      # cert from host certbot: /etc/letsencrypt/live/$MAIL_HOSTNAME
+      - ENABLE_RSPAMD=1           # spam filter, DKIM signing, DMARC/SPF checks
+      - ENABLE_OPENDKIM=0
+      - ENABLE_OPENDMARC=0
+      - ENABLE_POLICYD_SPF=0
+      - ENABLE_AMAVIS=0
+      - ENABLE_SPAMASSASSIN=0
+      - ENABLE_CLAMAV=0           # needs ~1 GB RAM; enable on bigger hosts
+      - RSPAMD_GREYLISTING=1
+      - RSPAMD_LEARN=1            # learns spam/ham when mail is moved to/from Junk
+      - MOVE_SPAM_TO_JUNK=1
+      - ENABLE_FAIL2BAN=1
+      - ENABLE_MANAGESIEVE=1      # filters + vacation replies (Roundcube); 4190 is not published
+      - ENABLE_POP3=0
+      - POSTMASTER_ADDRESS=${POSTMASTER_ADDRESS:?set POSTMASTER_ADDRESS in .env}
+      - SPOOF_PROTECTION=1
+      - ONE_DIR=1
+    networks:
+      default:
+        aliases:
+          - ${MAIL_HOSTNAME}      # Roundcube connects by this name, so TLS certificate names match
+    cap_add:
+      - NET_ADMIN                 # fail2ban
+    stop_grace_period: 1m
+    restart: unless-stopped
+
+  roundcube:
+    image: roundcube/roundcubemail:1.7.x-apache
+    container_name: roundcube
+    depends_on:
+      - mailserver
+    ports:
+      - "127.0.0.1:${WEBMAIL_PORT:-18090}:80"
+    volumes:
+      - ./data/roundcube/db:/var/roundcube/db
+      - ./roundcube/custom.inc.php:/var/roundcube/config/custom.inc.php:ro
+    environment:
+      - ROUNDCUBEMAIL_DB_TYPE=sqlite
+      - ROUNDCUBEMAIL_DEFAULT_HOST=ssl://${MAIL_HOSTNAME}
+      - ROUNDCUBEMAIL_DEFAULT_PORT=993
+      - ROUNDCUBEMAIL_SMTP_SERVER=tls://${MAIL_HOSTNAME}
+      - ROUNDCUBEMAIL_SMTP_PORT=587
+      - ROUNDCUBEMAIL_PLUGINS=archive,zipdownload,markasjunk,managesieve,newmail_notifier
+      - ROUNDCUBEMAIL_UPLOAD_MAX_FILESIZE=25M
+      - ROUNDCUBEMAIL_DES_KEY=${ROUNDCUBEMAIL_DES_KEY:?set ROUNDCUBEMAIL_DES_KEY in .env}
+      - MAIL_HOSTNAME=${MAIL_HOSTNAME}
+      - WEBMAIL_TITLE=${WEBMAIL_TITLE:-Webmail}
+      - PROXY_IP=${MAIL_GATEWAY:-172.21.0.1}
+    restart: unless-stopped
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${MAIL_SUBNET:-172.21.0.0/16}
+          gateway: ${MAIL_GATEWAY:-172.21.0.1}

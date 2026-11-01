@@ -1,0 +1,10 @@
+.env
+PASSWORDS
+data/
+config/postfix-accounts.cf
+config/postfix-virtual.cf
+config/dovecot-quotas.cf
+config/rspamd/dkim/
+config/rspamd/override.d/dkim_signing.conf
+config/*.lock
+config/opendkim/

@@ -1,0 +1,3 @@
+# Send over IPv4 only: most droplets/VPS have no working IPv6 inside Docker,
+# and trying IPv6 first only delays delivery.
+inet_protocols = ipv4

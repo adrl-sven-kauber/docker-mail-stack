@@ -1,0 +1,5 @@
+# Roundcube logs in from the Docker network. Never ban it: one person mistyping a password
+# in webmail would lock everyone out. Roundcube rate-limits failed logins itself.
+# Keep in sync with MAIL_SUBNET in .env.
+[DEFAULT]
+ignoreip = 127.0.0.1/8 172.21.0.0/16
